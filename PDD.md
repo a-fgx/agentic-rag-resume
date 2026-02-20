@@ -1,34 +1,33 @@
-# PDD.md  
-## Project: Parloa LangGraph LLM Proof
+# PDD.md
+## Project: Agentic RAG Resume — Phase 2 (MongoDB Atlas RAG)
 
 ---
 
 ## 1. Overview
 
-This project is a minimal technical prototype designed to demonstrate practical experience building and integrating AI/LLM-powered systems.
+This project is a CLI-based AI agent that answers questions about Alain Feigneux's professional background. It demonstrates practical experience building and integrating production-grade AI/LLM-powered systems.
 
-The prototype will:
+The agent:
 
-- Use LangGraph to orchestrate an agent workflow  
-- Implement RAG with a vector database (FAISS)  
-- Support prompt routing across multiple modes  
-- Enforce structured outputs via Pydantic  
-- Provide traceability (citations) and latency metrics  
-- Run entirely via CLI (no UI, no audio)
-
-This is a technical proof, not a production system.
+- Uses **LangGraph** to orchestrate a 5-node agent workflow
+- Implements **RAG** with **MongoDB Atlas Vector Search** (`$vectorSearch`)
+- Supports **prompt routing** across three response modes
+- Enforces **structured outputs** via Pydantic
+- Provides **traceability** (chunk-level citations) and **latency metrics**
+- Supports optional **text-to-speech** via ElevenLabs
+- Runs entirely via CLI
 
 ---
 
 ## 2. Objectives
 
-The system must prove competence in:
+The system demonstrates competence in:
 
-- Agent workflow orchestration  
-- Vector database integration  
-- Prompt orchestration and routing  
-- Structured output validation  
-- Observability discipline (timings, traceable evidence)
+- Agent workflow orchestration (LangGraph)
+- Vector database integration (MongoDB Atlas)
+- Prompt orchestration and routing
+- Structured output validation (Pydantic)
+- Observability discipline (per-node timings, traceable chunk citations)
 
 ---
 
@@ -37,45 +36,51 @@ The system must prove competence in:
 A reviewer can:
 
 ### 1. Run ingestion
-
 ```bash
-python -m app.ingest
+uv run python -m app.ingest
 ```
 
 ### 2. Run a query
 ```bash
-python cli.py "How do you handle latency spikes?" --mode incident
+uv run rag "How do you handle latency spikes?" --mode incident
 ```
 
 ### 3. Observe
 - Structured JSON output
-- Mode-specific behavior
-- Retrieved chunk citations
-- Retrieval and generation timings
+- Mode-specific behavior (qa / executive / incident)
+- Retrieved chunk citations (e.g. `resume.md#2`)
+- Per-node timing metrics (`retrieve`, `llm`, `total`)
 
 If these are present and coherent, the proof is successful.
 
-### 4. Scope
+---
 
-In Scope (v0)
-- Markdown knowledge ingestion
-- Chunking and embeddings
-- FAISS local vector index
-- Retrieval (top-k)
-- LangGraph workflow orchestration
+## 4. Scope
+
+### In Scope (Phase 2)
+- Markdown knowledge ingestion with stable chunk IDs
+- Paragraph-based chunking (~200 words per chunk)
+- Batch embedding via Gemini (`text-embedding-004`) or OpenAI
+- MongoDB Atlas `$vectorSearch` index (cosine similarity, 768 dims)
+- LangGraph workflow orchestration (5 nodes, conditional edge)
 - Mode routing (qa, executive, incident)
-- Structured JSON output (Pydantic)
-- Citations (chunk IDs)
-- Basic timing metrics
+- Structured JSON output with Pydantic validation
+- Chunk-level citations (`resume.md#2`, `projects.md#0`, ...)
+- Per-node timing metrics
+- Optional TTS via ElevenLabs (conditional routing)
+- 66 mocked tests — no API keys required for CI
 
-Out of Scope (v0)
-- Audio (STT / TTS)
+### Out of Scope
 - Web interface
 - Authentication
-- Distributed infrastructure
+- Streaming responses
 - Advanced evaluation framework
 
-### 5. Repository Structure
+---
+
+## 5. Repository Structure
+
+```
 agentic-rag-resume/
 ├── knowledge/
 │   ├── resume.md
@@ -90,237 +95,311 @@ agentic-rag-resume/
 │
 ├── app/
 │   ├── __init__.py
-│   ├── schemas.py
-│   ├── ingest.py
-│   ├── rag.py
-│   └── graph.py
+│   ├── schemas.py       # Pydantic models + GraphState TypedDict
+│   ├── ingest.py        # Ingestion: chunk → embed → upsert → index
+│   └── graph.py         # LangGraph: 5 nodes + conditional edge
 │
-├── store/
-│   ├── faiss.index
-│   └── chunks.jsonl
+├── tests/
+│   ├── conftest.py
+│   ├── test_m0_ingest.py
+│   ├── test_m1_graph.py
+│   ├── test_m2_output.py
+│   └── test_voice.py
 │
 ├── cli.py
-├── requirements.txt
-├── README.md
+├── pyproject.toml
+├── .env.example
 └── PDD.md
+```
 
-### 6. High-Level Architecture
+---
+
+## 6. High-Level Architecture
+
+```
 CLI
   │
   ▼
 LangGraph Workflow
-  ├── Retrieve Node (FAISS)
-  ├── Route Node (mode selection)
-  ├── Generate Node (LLM + structured output)
-  └── Finalize Node (citations + timings)
+  ├── Retrieve Node    (MongoDB Atlas $vectorSearch)
+  ├── Route Node       (mode → prompt template)
+  ├── Generate Node    (LLM + Pydantic structured output)
+  ├── Finalize Node    (chunk citations + total timing)
+  └── Speak Node       (ElevenLabs TTS — conditional)
 
-  Flow:
-  START → retrieve → route → generate → finalize → END
-
-### 7. Data Model
-
-Knowledge Chunks
-
-Each chunk stored in chunks.jsonl contains:
-- chunk_id (stable identifier)
-- source (filename)
-- text (chunk content)
-
-Runtime State (LangGraph)
-
-State keys:
-- mode
-- question
-- retrieved_chunks
-- answer
-- citations
-- timings_ms
-
-
-### 8. Vector Database Design
-
-Embeddings
-- Default model: text-embedding-3-large
-- Configurable via environment variable
-
-Similarity
-- L2 normalization + inner product (cosine-like similarity)
-
-Retrieval
-- Default top-k: 5
-- Include scores and chunk IDs
-
-Artifacts produced:
-- faiss.index
-- chunks.jsonl
-
-### 9. LangGraph Workflow Design
-
-Node 1: Retrieve
-
-Input: question
-Output: retrieved_chunks, retrieval timing
-
-Responsibilities:
-- Embed query
-- Perform FAISS search
-- Attach scores and chunk IDs
-
-⸻
-
-Node 2: Route
-
-Input: mode
-Output: selected prompt template
-
-Responsibilities:
-- Validate mode
-- Map to:
-- qa.txt
-- executive.txt
-- incident.txt
-
-⸻
-
-Node 3: Generate
-
-Input:
-- question
-- retrieved_chunks
-- selected prompt
-
-Output:
-- structured Answer object
-- LLM timing
-
-Responsibilities:
-- Build prompt with context
-- Call LLM
-- Parse JSON via Pydantic
-- Fail if schema invalid
-
-⸻
-
-Node 4: Finalize
-
-Input:
-- answer
-- retrieved_chunks
-- timings
-
-Output:
-- Final JSON envelope
-
-Responsibilities:
-- Select top 3 citations
-- Compute total timing
-- Return structured result
-
-### 10. Output Schema
-
-Answer Model
-- short_answer: string
-- technical_plan: list[string]
-- risks: list[string]
-- business_impact: list[string]
-- follow_up_question: optional string
-
-CLI Output Envelope
-{
-  "mode": "incident",
-  "question": "...",
-  "answer": { ... },
-  "citations": ["resume.md#12", "projects.md#4"],
-  "timings_ms": {
-    "retrieve": 52.1,
-    "llm": 820.4,
-    "total": 903.8
-  }
-}
-
-### 11. Prompt Strategy
-
-system.txt
-- Enterprise tone
-- Concise and operational
-- Grounded in provided context
-- Strict JSON output
-
-qa.txt
-- Factual answers
-- Context-only responses
-
-executive.txt
-- 60-second board-level framing
-- Still grounded in evidence
-
-incident.txt
-- SRE-style
-- Diagnosis
-- Mitigation
-- Prevention
-
-### 12. CLI Specification
-
-Command:
-```bash
-python cli.py "<question>" --mode qa|executive|incident --k 5
+Flow:
+START → retrieve → route → generate → finalize → END
+                                          ↓ (voice=True)
+                                        speak → END
 ```
 
+---
+
+## 7. Data Model
+
+### Knowledge Chunks (MongoDB Atlas)
+
+Each document stored in the `chunks` collection:
+
+```json
+{
+  "_id": "<ObjectId>",
+  "chunk_id": "resume.md#2",
+  "source": "resume.md",
+  "text": "...",
+  "embedding": [768 floats]
+}
+```
+
+### Runtime State (LangGraph `GraphState`)
+
+```python
+class GraphState(TypedDict, total=False):
+    mode: str                     # qa | executive | incident
+    question: str
+    k: int                        # top-k chunks (default: 5)
+    voice: bool                   # TTS flag
+    retrieved_chunks: list[dict]  # from MongoDB.aggregate()
+    prompt_template: str
+    answer: dict[str, Any]
+    citations: list[str]          # e.g. ["resume.md#2", "projects.md#0"]
+    timings_ms: dict[str, float]  # retrieve, llm, tts?, total
+```
+
+---
+
+## 8. Vector Database Design
+
+### Embedding Model
+- Default: `text-embedding-004` (Google Gemini, 768 dimensions)
+- Alternative: `text-embedding-3-large` (OpenAI, 1536 dimensions)
+- Configurable via `EMBEDDING_MODEL` environment variable
+
+### Similarity
+- Cosine similarity via MongoDB Atlas `$vectorSearch`
+
+### Retrieval
+- Default top-k: 5 (configurable via `--k` CLI flag)
+- Returns: `chunk_id`, `source`, `text`, `vectorSearchScore`
+
+### Vector Index Definition (Atlas)
+
+```json
+{
+  "name": "vector_index",
+  "type": "vectorSearch",
+  "definition": {
+    "fields": [
+      {
+        "type": "vector",
+        "path": "embedding",
+        "numDimensions": 768,
+        "similarity": "cosine"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 9. LangGraph Workflow Design
+
+### Node 1: Retrieve
+
+**Input:** `question`, `k`
+**Output:** `retrieved_chunks`, `timings_ms.retrieve`
+
+Responsibilities:
+- Embed question with `EMBEDDING_MODEL`
+- Run MongoDB Atlas `$vectorSearch` aggregation pipeline
+- Return top-k chunks with scores and chunk IDs
+
+### Node 2: Route
+
+**Input:** `mode`
+**Output:** `mode`, `prompt_template`
+
+Responsibilities:
+- Validate mode (`qa` | `executive` | `incident`), default to `qa`
+- Load matching prompt template from `prompts/<mode>.txt`
+
+### Node 3: Generate
+
+**Input:** `question`, `retrieved_chunks`, `prompt_template`
+**Output:** `answer`, `timings_ms.llm`
+
+Responsibilities:
+- Build context string: each chunk tagged with `[chunk_id]`
+- Use `.replace()` (not `.format()`) to safely inject `{context}` and `{question}`
+- Call LLM with `response_format={"type": "json_object"}`
+- Validate response against `Answer` Pydantic schema (fail fast if invalid)
+
+### Node 4: Finalize
+
+**Input:** `retrieved_chunks`, `timings_ms`
+**Output:** `citations`, `timings_ms.total`
+
+Responsibilities:
+- Extract `chunk_id` from each retrieved chunk → `citations`
+- Compute `total = sum(all timings)`
+
+### Node 5: Speak *(conditional)*
+
+**Input:** `answer.short_answer`, `timings_ms`
+**Output:** `timings_ms.tts`
+
+Responsibilities:
+- Only reached when `voice=True` (conditional edge from `finalize`)
+- Convert `short_answer` to audio via ElevenLabs `text_to_speech.convert`
+- Play audio inline
+
+---
+
+## 10. Ingestion Pipeline (`app/ingest.py`)
+
+```
+load_markdown_files()   → list of {source, text}
+  ↓
+chunk_document()        → list of {chunk_id, source, text}   (~200 words/chunk)
+  ↓
+embed_text()            → list of float[]                     (batched, 100/call)
+  ↓
+upsert_chunks()         → MongoDB insert_many                 (drops + recreates)
+  ↓
+ensure_vector_index()   → Atlas vectorSearch index creation   (idempotent)
+```
+
+---
+
+## 11. Output Schema
+
+### Answer Model
+
+```python
+class Answer(BaseModel):
+    short_answer: str
+    technical_plan: list[str]
+    risks: list[str]
+    business_impact: list[str]
+    follow_up_question: Optional[str] = None
+```
+
+### CLI Output Envelope
+
+```json
+{
+  "mode": "incident",
+  "question": "How did you handle production latency spikes?",
+  "answer": {
+    "short_answer": "...",
+    "technical_plan": ["..."],
+    "risks": ["..."],
+    "business_impact": ["..."],
+    "follow_up_question": "..."
+  },
+  "citations": ["resume.md#2", "stories.md#1", "projects.md#0"],
+  "timings_ms": {
+    "retrieve": 45.2,
+    "llm": 820.4,
+    "total": 865.6
+  }
+}
+```
+
+---
+
+## 12. Prompt Strategy
+
+### `system.txt`
+- Enterprise tone, concise and operational
+- Grounded strictly in provided context
+- Strict JSON output enforcement
+
+### `qa.txt`
+- Factual, direct answers
+- Context-only grounding
+
+### `executive.txt`
+- 60-second board-level framing
+- Business impact first, evidence-grounded
+
+### `incident.txt`
+- SRE-style: diagnosis → mitigation → prevention
+- Technical plan required
+
+---
+
+## 13. CLI Specification
+
+```bash
+uv run rag "<question>" [--mode qa|executive|incident] [--k N] [--voice]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `qa` | Response mode |
+| `--k` | `5` | Number of chunks to retrieve |
+| `--voice` | `False` | Speak `short_answer` via ElevenLabs |
+
 Behavior:
-- Fail if index missing
-- Print structured JSON to stdout
+- Prints structured JSON to stdout
 - Non-zero exit on fatal errors
 
+---
 
-### 13. Configuration
+## 14. Configuration
 
-Environment variables:
-- OPENAI_API_KEY (required)
-- EMBEDDING_MODEL (optional)
-- CHAT_MODEL (optional)
-- TOP_K (optional)
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GEMINI_API_KEY` | Yes* | — | Google Gemini API key |
+| `OPENAI_API_KEY` | Yes* | — | OpenAI API key (alternative to Gemini) |
+| `CHAT_MODEL` | No | `gemini-2.0-flash` | LLM model |
+| `EMBEDDING_MODEL` | No | `text-embedding-004` | Embedding model |
+| `MONGODB_URI` | Yes | — | MongoDB Atlas connection string |
+| `MONGODB_DB` | No | `ragresume` | Database name |
+| `MONGODB_COLLECTION` | No | `chunks` | Collection name |
+| `ELEVENLABS_API_KEY` | No | — | ElevenLabs key (only for `--voice`) |
+| `ELEVENLABS_VOICE_ID` | No | Rachel | ElevenLabs voice ID |
 
-### 14. Risks and Mitigation
-Risk
-Mitigation
-Hallucination
-Strict grounding + context-only rule
-Weak retrieval
-Improve chunking, increase top-k
-JSON parsing failure
-Pydantic validation
-High latency
-Use smaller chat model
+*Either `GEMINI_API_KEY` or `OPENAI_API_KEY` is required.
 
-### 15. Milestones
+---
 
-M0
-Ingestion and FAISS working
+## 15. Risks and Mitigations
 
-M1
-LangGraph workflow operational
+| Risk | Mitigation |
+|---|---|
+| Hallucination | Strict context-only grounding in prompts |
+| Weak retrieval | Paragraph-based chunking + configurable top-k |
+| JSON parsing failure | Pydantic validation — fails fast with clear error |
+| High latency | Configurable `--k`; use `gemini-2.0-flash` |
+| Atlas index not ready | 60-second build time documented; graceful error |
 
-M2
-Structured output + citations + timings
+---
 
-M3 (optional)
-Grounding verification node
-Switch to Qdrant for more production-like architecture
+## 16. Milestones
 
+| Milestone | Description | Status |
+|---|---|---|
+| M0 | Ingestion pipeline: chunk → embed → MongoDB upsert | Done |
+| M1 | LangGraph workflow: retrieve → route → generate → finalize | Done |
+| M2 | Structured output + chunk citations + per-node timings | Done |
+| M2+ | ElevenLabs TTS with conditional routing | Done |
+| M3 | Grounding verification node (optional) | Backlog |
 
-### 16. Definition of Done
+---
+
+## 17. Definition of Done
 
 The prototype clearly demonstrates:
-- Agent workflow orchestration via LangGraph
-- Vector database integration
-- Prompt routing logic
-- Structured and validated outputs
-- Traceable citations
-- Basic observability discipline
 
-No UI required.
-No audio required.
-Reproducible, inspectable proof of LLM system integration capability.
-
-
+- Agent workflow orchestration via LangGraph (5 nodes, conditional edge)
+- MongoDB Atlas Vector Search integration (`$vectorSearch`)
+- Knowledge ingestion pipeline (chunk → embed → upsert → index)
+- Prompt routing logic (3 modes)
+- Structured and validated outputs (Pydantic)
+- Traceable chunk-level citations
+- Per-node latency observability
+- 66 tests — all mocked, no API keys required for CI
+- GitHub Actions CI pipeline
