@@ -22,7 +22,7 @@ class TestSpeakNode:
                 "business_impact": [],
                 "follow_up_question": None,
             },
-            "timings_ms": {"load_context": 5.0, "llm": 200.0, "total": 205.0},
+            "timings_ms": {"retrieve": 5.0, "llm": 200.0, "total": 205.0},
         }
 
     def test_speak_node_calls_tts(self):
@@ -113,12 +113,23 @@ class TestFullGraphWithVoice:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([
+            {"chunk_id": "resume.md#0", "source": "resume.md", "text": "Alain worked at Nexthink.", "score": 0.9}
+        ])
+
         with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll), \
              patch("app.graph._get_el_client") as mock_get_el, \
              patch("app.graph.play") as mock_play:
 
             mock_llm = MagicMock()
             mock_llm.chat.completions.create.return_value = mock_chat_response
+            
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_llm.embeddings.create.return_value = mock_embed
+            
             mock_get_client.return_value = mock_llm
 
             mock_el = MagicMock()
@@ -138,11 +149,22 @@ class TestFullGraphWithVoice:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([
+            {"chunk_id": "resume.md#0", "source": "resume.md", "text": "Alain worked at Nexthink.", "score": 0.9}
+        ])
+
         with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll), \
              patch("app.graph.play") as mock_play:
 
             mock_llm = MagicMock()
             mock_llm.chat.completions.create.return_value = mock_chat_response
+
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_llm.embeddings.create.return_value = mock_embed
+
             mock_get_client.return_value = mock_llm
 
             g.run_graph("What did Alain do?", mode="qa", voice=False)
@@ -158,12 +180,23 @@ class TestFullGraphWithVoice:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([
+            {"chunk_id": "resume.md#0", "source": "resume.md", "text": "content", "score": 0.9}
+        ])
+
         with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll), \
              patch("app.graph._get_el_client") as mock_get_el, \
              patch("app.graph.play"):
 
             mock_llm = MagicMock()
             mock_llm.chat.completions.create.return_value = mock_chat_response
+
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_llm.embeddings.create.return_value = mock_embed
+
             mock_get_client.return_value = mock_llm
 
             mock_el = MagicMock()
@@ -183,9 +216,20 @@ class TestFullGraphWithVoice:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
-        with patch("app.graph._get_client") as mock_get_client:
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([
+            {"chunk_id": "resume.md#0", "source": "resume.md", "text": "content", "score": 0.9}
+        ])
+
+        with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll):
             mock_llm = MagicMock()
             mock_llm.chat.completions.create.return_value = mock_chat_response
+
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_llm.embeddings.create.return_value = mock_embed
+
             mock_get_client.return_value = mock_llm
 
             result = g.run_graph("Question", mode="qa", voice=False)

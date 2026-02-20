@@ -16,13 +16,13 @@ from app.schemas import Answer, GraphState, OutputEnvelope
 
 load_dotenv()
 
-KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+KNOWLEDGE_DIR = Path(__file__).parent.parent / "knowledge"
 VALID_MODES = {"qa", "executive", "incident"}
 
 # ---------------------------------------------------------------------------
-# Lazy-initialised LLM client — Gemini (via OpenAI-compatible API) or OpenAI
-# Set GEMINI_API_KEY to use Gemini; otherwise falls back to OPENAI_API_KEY.
+# Lazy-initialised LLM / embedding client
+# Gemini (via OpenAI-compatible API) when GEMINI_API_KEY is set, else OpenAI.
 # ---------------------------------------------------------------------------
 _client: OpenAI | None = None
 
@@ -34,10 +34,30 @@ def _get_client() -> OpenAI:
     if _client is None:
         gemini_key = os.getenv("GEMINI_API_KEY")
         if gemini_key:
-            _client = OpenAI(api_key=gemini_key, base_url=GEMINI_BASE_URL)
+            _client = OpenAI(
+                api_key=gemini_key, base_url=GEMINI_BASE_URL, max_retries=10
+            )
         else:
-            _client = OpenAI()  # falls back to OPENAI_API_KEY
+            _client = OpenAI(max_retries=10)  # falls back to OPENAI_API_KEY
     return _client
+
+
+# ---------------------------------------------------------------------------
+# Lazy-initialised MongoDB collection
+# ---------------------------------------------------------------------------
+_mongo_collection = None
+
+
+def _get_mongo_collection():
+    global _mongo_collection
+    if _mongo_collection is None:
+        from pymongo import MongoClient
+
+        mongo_client = MongoClient(os.getenv("MONGODB_URI"))
+        _mongo_collection = mongo_client[os.getenv("MONGODB_DB", "ragresume")][
+            os.getenv("MONGODB_COLLECTION", "chunks")
+        ]
+    return _mongo_collection
 
 
 # ---------------------------------------------------------------------------
@@ -54,26 +74,48 @@ def _get_el_client() -> ElevenLabs:
 
 
 # ---------------------------------------------------------------------------
-# Node 1: load_context
+# Node 1: retrieve
 # ---------------------------------------------------------------------------
 
-def load_context_node(state: GraphState) -> GraphState:
-    """Load all knowledge markdown files and concatenate into a single context string."""
+def retrieve_node(state: GraphState) -> GraphState:
+    """Embed the question and retrieve the top-k chunks from MongoDB Atlas."""
     t0 = time.perf_counter()
 
-    parts: list[str] = []
-    for md_file in sorted(KNOWLEDGE_DIR.glob("*.md")):
-        content = md_file.read_text(encoding="utf-8").strip()
-        parts.append(f"=== {md_file.name} ===\n\n{content}")
+    question = state.get("question", "")
+    k = state.get("k", 5)
+    embed_model = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
 
-    context = "\n\n" + ("\n\n" + "=" * 60 + "\n\n").join(parts) + "\n\n"
-    citations = [f.name for f in sorted(KNOWLEDGE_DIR.glob("*.md"))]
+    client = _get_client()
+    resp = client.embeddings.create(model=embed_model, input=[question])
+    query_vec = resp.data[0].embedding
+
+    collection = _get_mongo_collection()
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "index": "vector_index",
+                "path": "embedding",
+                "queryVector": query_vec,
+                "numCandidates": k * 10,
+                "limit": k,
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "chunk_id": 1,
+                "source": 1,
+                "text": 1,
+                "score": {"$meta": "vectorSearchScore"},
+            }
+        },
+    ]
+    retrieved = list(collection.aggregate(pipeline))
 
     elapsed = round((time.perf_counter() - t0) * 1000, 1)
     return {
-        "context": context,
-        "citations": citations,
-        "timings_ms": {**state.get("timings_ms", {}), "load_context": elapsed},
+        "retrieved_chunks": retrieved,
+        "timings_ms": {**state.get("timings_ms", {}), "retrieve": elapsed},
     }
 
 
@@ -96,11 +138,16 @@ def route_node(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def generate_node(state: GraphState) -> GraphState:
-    """Build prompt, call LLM with JSON mode, validate output with Pydantic."""
+    """Build prompt from retrieved chunks, call LLM, validate with Pydantic."""
     t0 = time.perf_counter()
 
-    context = state.get("context", "")
+    chunks = state.get("retrieved_chunks", [])
     question = state.get("question", "")
+
+    # Build context from retrieved chunks, tagging each with its chunk_id
+    context = "\n\n---\n\n".join(
+        f"[{c['chunk_id']}]\n{c['text']}" for c in chunks
+    )
 
     # Use .replace() instead of .format() — context may contain literal { } chars
     user_prompt = (
@@ -139,10 +186,13 @@ def generate_node(state: GraphState) -> GraphState:
 # ---------------------------------------------------------------------------
 
 def finalize_node(state: GraphState) -> GraphState:
-    """Compute total timing."""
+    """Set citations from retrieved chunks and compute total timing."""
+    chunks = state.get("retrieved_chunks", [])
+    citations = [c["chunk_id"] for c in chunks]
+
     timings = {**state.get("timings_ms", {})}
     timings["total"] = round(sum(timings.values()), 1)
-    return {"timings_ms": timings}
+    return {"citations": citations, "timings_ms": timings}
 
 
 # ---------------------------------------------------------------------------
@@ -189,14 +239,14 @@ def _route_after_finalize(state: GraphState) -> str:
 
 def build_graph():
     workflow = StateGraph(GraphState)
-    workflow.add_node("load_context", load_context_node)
+    workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("route", route_node)
     workflow.add_node("generate", generate_node)
     workflow.add_node("finalize", finalize_node)
     workflow.add_node("speak", speak_node)
 
-    workflow.set_entry_point("load_context")
-    workflow.add_edge("load_context", "route")
+    workflow.set_entry_point("retrieve")
+    workflow.add_edge("retrieve", "route")
     workflow.add_edge("route", "generate")
     workflow.add_edge("generate", "finalize")
     workflow.add_conditional_edges("finalize", _route_after_finalize, {"speak": "speak", END: END})
@@ -212,13 +262,16 @@ _graph = build_graph()
 # Public interface
 # ---------------------------------------------------------------------------
 
-def run_graph(question: str, mode: str = "qa", voice: bool = False) -> dict:
+def run_graph(
+    question: str, mode: str = "qa", voice: bool = False, k: int = 5
+) -> dict:
     """Run the full LangGraph workflow and return a serialisable OutputEnvelope dict."""
     initial_state: GraphState = {
         "question": question,
         "mode": mode,
         "voice": voice,
-        "context": "",
+        "k": k,
+        "retrieved_chunks": [],
         "prompt_template": "",
         "answer": {},
         "citations": [],

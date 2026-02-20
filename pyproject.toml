@@ -1,11 +1,12 @@
 [project]
 name = "agentic-rag-resume"
-version = "0.1.0"
-description = "CLI RAG agent — LangGraph + Gemini + ElevenLabs over Alain Feigneux's resume"
+version = "0.2.0"
+description = "CLI RAG agent — LangGraph + Gemini + ElevenLabs + MongoDB Atlas over Alain Feigneux's resume"
 requires-python = ">=3.12"
 dependencies = [
     "langgraph>=0.2.0",
     "openai>=1.30.0",
+    "pymongo>=4.7.0",
     "pydantic>=2.7.0",
     "python-dotenv>=1.0.0",
     "elevenlabs>=1.0.0",
@@ -18,9 +19,6 @@ rag = "cli:main"
 dev = [
     "pytest>=8.0.0",
     "pytest-mock>=3.14.0",
-]
-rag-phase2 = [
-    "pymongo>=4.7.0",
 ]
 
 [build-system]

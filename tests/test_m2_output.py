@@ -79,9 +79,22 @@ class TestRunGraphOutput:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
-        with patch("app.graph._get_client") as mock_get_client:
+        # Mock MongoDB
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([
+            {"chunk_id": "resume.md#0", "source": "resume.md", "text": "Alain worked at Nexthink.", "score": 0.9}
+        ])
+
+        with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll):
             mock_client = MagicMock()
+            # Mock chat completion
             mock_client.chat.completions.create.return_value = _make_llm_response(answer_dict)
+            # Mock embedding
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_client.embeddings.create.return_value = mock_embed
+            
             mock_get_client.return_value = mock_client
 
             return g.run_graph("Test question", mode=mode)
@@ -93,7 +106,7 @@ class TestRunGraphOutput:
 
     def test_timings_has_required_keys(self, valid_answer_dict, tmp_path, monkeypatch):
         result = self._run("qa", tmp_path, monkeypatch, valid_answer_dict)
-        for key in ("load_context", "llm", "total"):
+        for key in ("retrieve", "llm", "total"):
             assert key in result["timings_ms"], f"Missing timing key: {key}"
 
     def test_timings_are_non_negative_floats(self, valid_answer_dict, tmp_path, monkeypatch):
@@ -124,9 +137,16 @@ class TestRunGraphOutput:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
-        with patch("app.graph._get_client") as mock_get_client:
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([])
+
+        with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll):
             mock_client = MagicMock()
             mock_client.chat.completions.create.return_value = _make_llm_response(valid_answer_dict)
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_client.embeddings.create.return_value = mock_embed
             mock_get_client.return_value = mock_client
 
             result = g.run_graph("Specific question text", mode="qa")
@@ -184,9 +204,16 @@ class TestCLIErrors:
             "follow_up_question": None,
         }
 
-        with patch("app.graph._get_client") as mock_get_client:
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([])
+
+        with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll):
             mock_client = MagicMock()
             mock_client.chat.completions.create.return_value = _make_llm_response(answer)
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_client.embeddings.create.return_value = mock_embed
             mock_get_client.return_value = mock_client
 
             result = g.run_graph("Any question", mode="qa")
@@ -199,9 +226,16 @@ class TestCLIErrors:
         import app.graph as g
         monkeypatch.setattr(g, "KNOWLEDGE_DIR", tmp_path)
 
-        with patch("app.graph._get_client") as mock_get_client:
+        mock_coll = MagicMock()
+        mock_coll.aggregate.return_value = iter([])
+
+        with patch("app.graph._get_client") as mock_get_client, \
+             patch("app.graph._get_mongo_collection", return_value=mock_coll):
             mock_client = MagicMock()
             mock_client.chat.completions.create.side_effect = ConnectionError("API unreachable")
+            mock_embed = MagicMock()
+            mock_embed.data = [MagicMock(embedding=[0.1]*768)]
+            mock_client.embeddings.create.return_value = mock_embed
             mock_get_client.return_value = mock_client
 
             with pytest.raises(ConnectionError):

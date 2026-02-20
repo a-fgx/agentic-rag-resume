@@ -10,11 +10,12 @@ class GraphState(TypedDict, total=False):
 
     mode: str
     question: str
+    k: int                            # Number of chunks to retrieve (default: 5)
     voice: bool                       # If True, speak short_answer via ElevenLabs TTS
-    context: str                      # Full concatenated knowledge (Phase 1)
+    retrieved_chunks: list[dict]      # Chunks returned by retrieve_node
     prompt_template: str
     answer: dict[str, Any]
-    citations: list[str]              # Source files (Phase 1) / chunk IDs (Phase 2)
+    citations: list[str]              # Chunk IDs (e.g. "resume.md#3")
     timings_ms: dict[str, float]
 
 
