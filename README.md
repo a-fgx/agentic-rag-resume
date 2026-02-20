@@ -1,5 +1,7 @@
 # Agentic RAG Resume
 
+[![Tests](https://github.com/a-fgx/agentic-rag-resume/actions/workflows/tests.yml/badge.svg)](https://github.com/a-fgx/agentic-rag-resume/actions/workflows/tests.yml)
+
 A CLI agent that answers questions about Alain Feigneux's professional background using **LangGraph**, **Gemini**, **ElevenLabs TTS**, and **Pydantic**.
 
 ---
