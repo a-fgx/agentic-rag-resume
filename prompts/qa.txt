@@ -1,0 +1,6 @@
+Context:
+{context}
+
+Question: {question}
+
+Answer factually and concisely using only the context above. Return JSON.

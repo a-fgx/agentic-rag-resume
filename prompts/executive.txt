@@ -1,0 +1,9 @@
+Context:
+{context}
+
+Question: {question}
+
+Frame your answer at a board level. Assume the audience is a C-level executive with 60 seconds to read.
+Focus on strategic value, quantified outcomes, and organizational impact.
+Avoid technical jargon. Emphasize business results and leadership capability.
+Return JSON.

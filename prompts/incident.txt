@@ -1,0 +1,13 @@
+Context:
+{context}
+
+Question: {question}
+
+Structure your answer as an SRE incident response:
+- short_answer: root cause or diagnosis based on the context
+- technical_plan: concrete mitigation or resolution steps taken or proposed
+- risks: what could recur or go wrong if not addressed
+- business_impact: effect on delivery, reliability, SLA, or users
+- follow_up_question: what to investigate or validate next
+
+Be specific and operational. Use SRE terminology where appropriate. Return JSON.
